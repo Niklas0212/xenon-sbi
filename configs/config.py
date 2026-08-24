@@ -1,11 +1,10 @@
-"""Configuration module for WIMP detection models and parameter ranges.
+"""Project-wide configuration for WIMP direct-detection simulations and model training.
 
-Defines:
-- MCConfig: Dataclass for Monte Carlo simulation parameters
-- TrainingDefaults: Shared default hyperparameters for training scripts
-- PARAM_RANGES: Parameter space definitions for different signal regions
-- MODEL_CONFIG: Architecture and optimizer specs for each model type
-- Helper functions for model/optimizer instantiation
+This module centralizes the default settings used throughout the analysis
+pipeline, including Monte Carlo simulation parameters, parameter-space ranges,
+and model-specific training configuration. It defines the reusable dataclasses
+and dictionaries required to keep the experimental setup, parameter grid, and
+network architectures consistent across scripts and notebooks.
 """
 
 import os
@@ -317,40 +316,6 @@ def load_model(
     return _load_model_from_checkpoint(path, modelname, input_dim, device, print_arch)
 
 
-def load_model_s1s2(
-    path: str,
-    bins: int,
-    modelname: str,
-    device: str = "cpu",
-    print_arch: bool = False,
-) -> Tuple[torch.nn.Module, dict]:
-    """Load an S1-S2 2D histogram model from checkpoint.
-
-    Parameters
-    ----------
-    path : str
-        Path to model checkpoint (.pt file).
-    bins : int
-        Number of bins per dimension (S1 and S2).
-    modelname : str
-        Model architecture name (must exist in MODEL_CONFIG).
-    device : str
-        Device to load model onto (default: 'cpu').
-    print_arch : bool
-        Whether to print model architecture (default: False).
-
-    Returns
-    -------
-    model : torch.nn.Module
-        Loaded model in eval mode.
-    ckpt : dict
-        Full checkpoint dictionary.
-    """
-    cfg = MODEL_CONFIG[modelname]
-    input_dim = cfg["input_dim_fn"](bins, bins)
-    return _load_model_from_checkpoint(path, modelname, input_dim, device, print_arch)
-
-
 def load_halo_models(
     halos: List[str],
     modelname: str,
@@ -452,6 +417,40 @@ def load_halo_models(
         label_list.append("combined")
 
     return model_list, label_list
+
+
+def load_model_s1s2(
+    path: str,
+    bins: int,
+    modelname: str,
+    device: str = "cpu",
+    print_arch: bool = False,
+) -> Tuple[torch.nn.Module, dict]:
+    """Load an S1-S2 2D histogram model from checkpoint.
+
+    Parameters
+    ----------
+    path : str
+        Path to model checkpoint (.pt file).
+    bins : int
+        Number of bins per dimension (S1 and S2).
+    modelname : str
+        Model architecture name (must exist in MODEL_CONFIG).
+    device : str
+        Device to load model onto (default: 'cpu').
+    print_arch : bool
+        Whether to print model architecture (default: False).
+
+    Returns
+    -------
+    model : torch.nn.Module
+        Loaded model in eval mode.
+    ckpt : dict
+        Full checkpoint dictionary.
+    """
+    cfg = MODEL_CONFIG[modelname]
+    input_dim = cfg["input_dim_fn"](bins, bins)
+    return _load_model_from_checkpoint(path, modelname, input_dim, device, print_arch)
 
 
 def load_halo_models_s1s2(

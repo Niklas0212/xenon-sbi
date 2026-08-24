@@ -1,5 +1,18 @@
 """
-Posterior Inference Utilities for WIMP Parameter Estimation.
+Utilities for visualizing and interpreting posterior distributions in WIMP
+parameter-estimation analyses.
+
+This module centralizes the plotting, coordinate conversion, and formatting
+logic used to present Bayesian inference results in the dark-matter parameter
+space. It provides helpers for transforming posterior grids between
+mass-coupling and mass-cross-section representations, normalizing axis
+quantities, and generating publication-style contour plots with consistent
+visual styling.
+
+The functions in this file are intended to support the comparison of inferred
+posterior regions with theory expectations and experimental sensitivities,
+making results easier to inspect, interpret, and communicate in scientific
+workflows and thesis figures.
 """
 
 import os
@@ -22,7 +35,7 @@ M_PROTON_GEV = 0.938
 GEV2_TO_CM2 = 3.89379e-28
 DEFAULT_XENONNT_PATH = "data\\datasets\\xenon\\s1s2\\official\\xenonnt_2025_si_wimp.csv"
 
-# Shared plotting style for publication-ready readability
+# Shared plotting style 
 PLOT_AXIS_LABEL_SIZE = 16
 PLOT_TICK_LABEL_SIZE = 12
 PLOT_COLORBAR_LABEL_SIZE = 13

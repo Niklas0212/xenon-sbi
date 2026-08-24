@@ -1,6 +1,5 @@
 """
 Neural network architectures for simulation-based inference of WIMP parameters.
-
 """
 
 import torch

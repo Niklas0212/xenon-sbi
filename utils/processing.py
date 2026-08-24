@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from sklearn.model_selection import train_test_split
 
 # ============================================================================
-# FEATURE PREPROCESSING
+# FEATURE PREPROCESSING (ONLY RELEVANT FOR 1D WIMPYDD APPROACH)
 # ============================================================================
 
 def preprocess_features(model: nn.Module, counts: torch.Tensor, device: torch.device) -> torch.Tensor:
@@ -382,8 +382,8 @@ def clean_nan_events(energies_list, cs1cs2_list, xyz_list=None):
         return cleaned_energies, cleaned_cs1cs2
 
 
-class SignalPlusBackgroundDataset(torch.utils.data.Dataset):
 
+class SignalPlusBackgroundDataset(torch.utils.data.Dataset):
     """
     Dataset that generates 2D histograms on-the-fly from signal + background events.
 
