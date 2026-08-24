@@ -1,0 +1,31 @@
+The code is contained in the WimPyDD folder. All the libraries
+needed by WimPyDD should be present in a standard Python
+installation. However if some are missing an import of WimPyDD will
+attempt to install them. This is also useful if WimPyDD is installed
+in a dedicated fresh virtual environment. For instance, using
+python3.7:
+
+$ virtualenv -p python3.7 WD_Env
+$ source WD_Env/bin/activate
+(WD_Env) $ pip install --upgrade pip
+(WD_Env) $ python
+
+
+>>>import WimPyDD as WD
+
+should produce a clean WimPyDD installation will all the required
+dependencies. (having python3.8 installed virtualenv -p python3.8
+WD_Env should also work). As in the example above it is advisable to
+update pip before the first WimPyDD import.
+
+To test the installation, download and run the code
+test_WimPyDD_installation.py. If WimPyDD is installed correctly, it
+should produced a series of plots as output (you may need to close
+each plot to produce the successive one).
+
+First release date: June 14, 2021
+Requires Python 3.7 onward.
+Tested on: Mac OS X, Ubuntu 20.04
+System requirements: The package size is 28.7 MB, including tables with the
+integrated response functions for XENON1T, PICO60 and DAMA/LIBRA.
+

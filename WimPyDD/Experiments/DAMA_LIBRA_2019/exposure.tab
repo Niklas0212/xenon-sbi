@@ -1,0 +1,2 @@
+# exposure set to the inverse of each bin width to normalize rate to events/kg/day/keV
+np.array([2.,2.,2.,2.,2.,2.,2.,2.,2.,2.,2.,2.,2.,2.,1./8.])
