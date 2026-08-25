@@ -459,15 +459,14 @@ def load_halo_models_s1s2(
     n_train: int,
     bins: int,
     mu_bg: float = 0,
-    training_mode: str = "offline",
     device: str = "cpu",
     print_arch: bool = False,
 ) -> Tuple[List[torch.nn.Module], List[str]]:
     """Load individual S1S2 halo models and their combined model.
 
     Uses the same directory convention as the S1S2 training scripts:
-      Single halo:  models/xenon/{mode}/{signal_type}/{halo}/{model}.pt
-      Combined:     models/xenon/{mode}/{signal_type}/combined/{halo_tag}/{model}.pt
+      Single halo:  models/xenon/{signal_type}/{halo}/{model}.pt
+      Combined:     models/xenon/{signal_type}/combined/{halo_tag}/{model}.pt
 
     Parameters
     ----------
@@ -481,8 +480,6 @@ def load_halo_models_s1s2(
         Number of S1/S2 bins per dimension.
     mu_bg : float
         Expected background events (0 = signal-only).
-    training_mode : str
-        'offline' or 'online'.
     device : str
         Device to load models onto.
     print_arch : bool
@@ -503,7 +500,7 @@ def load_halo_models_s1s2(
     label_list = []
 
     for halo in halos:
-        path = f"models/xenon/{training_mode}/{signal_type}/{halo}/{modelname}_bins{bins}_n{n_train}_{halo}.pt"
+        path = f"models/xenon/{signal_type}/{halo}/{modelname}_bins{bins}_n{n_train}_{halo}.pt"
         print(f"Loading model from {path}")
         if not os.path.exists(path):
             raise FileNotFoundError(f"Model not found at {path}")
@@ -513,7 +510,7 @@ def load_halo_models_s1s2(
 
     if len(halos) > 1:
         halo_tag = "_".join(halos)
-        combined_path = f"models/xenon/{training_mode}/{signal_type}/combined/{halo_tag}/{modelname}_bins{bins}_n{n_train}_{halo_tag}.pt"
+        combined_path = f"models/xenon/{signal_type}/combined/{halo_tag}/{modelname}_bins{bins}_n{n_train}_{halo_tag}.pt"
         print(f"Loading combined model from {combined_path}")
         if not os.path.exists(combined_path):
             raise FileNotFoundError(f"Combined model not found at {combined_path}")

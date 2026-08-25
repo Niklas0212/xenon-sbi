@@ -1,8 +1,13 @@
 """
 Performance evaluation for trained SBI models on dark matter detection tasks.
 
-Provides multi-metric evaluation (coverage, JSD, Wasserstein, Euclidean/Mahalanobis),
+Provides multi-metric evaluation (coverage, JSD, Euclidean/Mahalanobis),
 result caching, and formatted output.
+
+The command-line interface evaluates the selected WimPyDD models for one or
+more energy regimes. Results are stored as PyTorch files in
+``performances/performances_results`` and reused when the same evaluation
+configuration is requested again.
 
 Usage:
     python3 -m performances.performances --n-total 20000
@@ -23,8 +28,6 @@ from utils.processing import load_matching_pairs
 from performances.metrics import (
     coverage_test,
     jsd_eval,
-    wasserstein_eval_marginals,
-    wasserstein_eval_sliced,
     euclidean_mahalanobis_eval,
 )
 from configs.config import load_model, MODEL_CONFIG, PARAM_RANGES
@@ -46,7 +49,7 @@ def evaluate_models(
     Evaluate all or specific models on multiple performance metrics.
 
     Loads matching data pairs, analytical posterior grids, and trained models,
-    then computes coverage, JSD, Wasserstein, and distance-based metrics.
+    then computes coverage, JSD, and distance-based metrics.
 
     Parameters
     ----------
@@ -70,8 +73,9 @@ def evaluate_models(
     dict[str, list[dict]]
         Results organized by datatag. Each entry contains list of dicts with keys:
         "model", "val_loss", "val_acc", "cvg_abs", "cvg_signed", "jsd",
-        "wass_sliced", "wass_mass", "wass_cp", "euclidean_median",
-        "euclidean_mean", "mahalanobis_median", "mahalanobis_mean"
+        "euclidean_median", "euclidean_mean", "mahalanobis_median", "mahalanobis_mean"
+        Models whose checkpoint does not exist are omitted from the corresponding
+        datatag.
     """
 
     results_by_tag = {tag: [] for tag in datatags}
@@ -144,27 +148,6 @@ def evaluate_models(
                 n_samples=n_total,
             )
 
-            mean_marg, _ = wasserstein_eval_marginals(
-                model,
-                X_matching,
-                T_matching,
-                logm_range,
-                logcp_range,
-                ppg,
-                n_samples=n_total,
-            )
-
-            mean_wass_sliced, _ = wasserstein_eval_sliced(
-                model,
-                X_matching,
-                T_matching,
-                logm_range,
-                logcp_range,
-                ppg,
-                n_samples=n_total,
-                n_projections=50,
-            )
-
             dist_results = euclidean_mahalanobis_eval(
                 model,
                 X_matching,
@@ -184,9 +167,6 @@ def evaluate_models(
                     cvg_abs=cvg_abs,
                     cvg_signed=cvg_signed,
                     jsd=mean_jsd,
-                    wass_sliced=mean_wass_sliced,
-                    wass_mass=mean_marg["mass"],
-                    wass_cp=mean_marg["cp"],
                     euclidean_median=dist_results["median_euclidean"],
                     euclidean_mean=dist_results["mean_euclidean"],
                     mahalanobis_median=dist_results["median_mahalanobis"],
@@ -216,6 +196,9 @@ def get_or_evaluate_performances(
 
     Wraps evaluate_models() with result caching to avoid redundant computations.
     Results are cached to disk with metadata for reproducibility.
+    The cache filename includes the halo, model selection, training-set size,
+    evaluation-set size, and split. Existing cache files are loaded without
+    recomputing the metrics.
 
     Parameters
     ----------
@@ -238,7 +221,9 @@ def get_or_evaluate_performances(
     -------
     tuple[dict, dict]
         (results, meta) where results is organized by datatag and meta contains
-        evaluation parameters for reference
+        evaluation parameters for reference. Results are saved under
+        ``performances/performances_results/perf_<halo>_<model>_n<n_train>``
+        followed by the evaluation size and split.
     """
     outdir = "performances/performances_results"
     os.makedirs(outdir, exist_ok=True)
@@ -299,7 +284,12 @@ def print_performance_tables(results, meta, datatags):
     meta : dict
         Metadata about the evaluation (n_train, n_total, split, etc.)
     datatags : list[str]
-        Datatags to display
+        Datatags to display. Each tag must be present in ``results``.
+
+    Returns
+    -------
+    None
+        Prints one sorted table per datatag and does not modify ``results``.
     """
     print("\nMeta:", meta)
 
@@ -319,9 +309,6 @@ def print_performance_tables(results, meta, datatags):
                 r["cvg_abs"],
                 r["cvg_signed"],
                 r["jsd"],
-                r["wass_sliced"],
-                r["wass_mass"],
-                r["wass_cp"],
                 r["euclidean_median"],
                 r["euclidean_mean"],
                 r["mahalanobis_median"],
@@ -335,8 +322,7 @@ def print_performance_tables(results, meta, datatags):
             headers=[
                 "Model", "ValLoss", "ValAcc",
                 "CvgAbs", "CvgSigned",
-                "JSD", "SWD", "W(m)", "W(cp)",
-                "EucMed", "EucMean",
+                "JSD", "EucMed", "EucMean",
                 "MahMed", "MahMean",
             ],
             floatfmt=".3f",
@@ -356,7 +342,9 @@ def parse_args():
     Returns
     -------
     argparse.Namespace
-        Parsed arguments with defaults
+        Parsed arguments with defaults. ``datatags`` contains one or more
+        energy-regime names, and ``model`` is ``None`` unless a specific model
+        was requested.
     """
     parser = argparse.ArgumentParser(
         description="Evaluate trained SBI models on performance metrics."

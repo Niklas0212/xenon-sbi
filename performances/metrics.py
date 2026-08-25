@@ -6,15 +6,18 @@ posteriors for WIMP parameter inference (mass and coupling). Implemented metrics
 
 - Coverage tests using HPD (Highest Posterior Density) regions
 - Jensen-Shannon divergence (JSD)
-- Wasserstein distances (marginal and sliced 2D)
 - Posterior quality metrics (Euclidean, Mahalanobis distances)
+
+The posterior grids use ``log10(mass)`` and ``log10(coupling)`` as their two
+parameter axes. Most evaluation functions operate on batched observation and
+parameter tensors, while plotting helpers consume the dictionaries returned
+by the corresponding evaluation function.
 
 Organization:
     1. Coverage Tests (General)
     2. Coverage Tests (Halo/S1S2 Comparisons)
     3. Posterior Quality Metrics
     4. Jensen-Shannon Divergence
-    5. Wasserstein Distance Metrics
 """
 
 import numpy as np
@@ -27,7 +30,6 @@ from collections import defaultdict
 from scipy import stats
 from scipy.special import rel_entr
 from scipy.ndimage import generic_filter
-from scipy.stats import wasserstein_distance
 
 from utils.posteriors import posterior_grid
 from utils.processing import (
@@ -52,14 +54,17 @@ def compute_credible_region(
     Parameters
     ----------
     posterior : torch.Tensor
-        2D posterior probability distribution (will be normalized).
+        2D posterior probability distribution (will be normalized). Its axes
+        must correspond to the coupling and mass grid axes used by the caller.
     levels : np.ndarray
-        Credibility levels to compute (e.g., np.array([0.68, 0.90]) for 68% and 90%).
+        Credibility levels to compute, in the interval [0, 1] (e.g.,
+        ``np.array([0.68, 0.90])`` for 68% and 90%).
     
     Returns
     -------
     Dict[float, np.ndarray]
-        Dictionary mapping each level to a boolean mask indicating HPD region.
+        Dictionary mapping each level to a boolean mask indicating the HPD
+        region. Each mask has the same shape as ``posterior``.
     """
     # Normalize posterior
     posterior = posterior / posterior.sum()
@@ -99,9 +104,10 @@ def coverage_test(
     model : torch.nn.Module
         Trained neural network model.
     features : torch.Tensor
-        Features/observations.
+        Features/observations with one sample per row.
     thetas : torch.Tensor
-        True parameter values corresponding to features.
+        True parameter values corresponding to ``features``, with columns
+        ``[log10(mass), log10(coupling)]``.
     logm_range : Tuple[float, float]
         (min, max) for log10(mass) parameter space.
     logcp_range : Tuple[float, float]
@@ -123,6 +129,12 @@ def coverage_test(
         Mean absolute deviation from nominal coverage.
     score_signed : float
         Mean signed deviation from nominal coverage.
+
+    Notes
+    -----
+    At most ``n_samples`` rows are evaluated. The true parameter for each row
+    is assigned to the nearest posterior-grid point before checking HPD
+    membership.
     """
     n_total = min(n_samples, len(features))
     inside_counts = {level: 0 for level in levels}
@@ -618,6 +630,12 @@ def euclidean_mahalanobis_eval(
         - "distances_mahalanobis": All Mahalanobis distances
         - "logm": List of true log10(mass) values for each sample
         - "logcp": List of true log10(coupling) values for each sample
+
+    Notes
+    -----
+    Zero-event spectra are excluded by default because distance-based
+    posterior comparisons are not meaningful for exclusion regions. Mahalanobis
+    distances can be ``NaN`` when the posterior covariance is not invertible.
     """
     euclidean_distances = []
     mahalanobis_distances = []
@@ -682,7 +700,8 @@ def plot_mahalanobis_diagnostics(
     bins : int
         Number of bins per axis for heatmap.
     fill_holes : bool
-        Whether to fill empty bins in heatmap with neighbor averages.
+        Whether to fill empty bins in the heatmap with averages from a local
+        3x3 neighborhood. If false, empty bins remain ``NaN``.
     cmap : str
         Colormap for plots.
     """
@@ -1726,398 +1745,7 @@ def plot_jsd_diagnostics(
 
 
 
-# ============================================================================
-# Wasserstein distance - marginal
-# ============================================================================
 
-def wasserstein_marginals(P: np.ndarray, Q: np.ndarray) -> Dict[str, float]:
-    """
-    Compute Wasserstein distances for marginals of 2D distributions.
-
-    Parameters
-    ----------
-    P, Q : np.ndarray
-        2D arrays representing discrete probability distributions (same shape).
-        Will be normalized internally.
-
-    Returns
-    -------
-    Dict[str, float]
-        Dictionary with keys:
-        - "mass": Wasserstein distance for marginal over mass axis
-        - "cp": Wasserstein distance for marginal over coupling axis
-    """
-    # Clip and normalize
-    P = np.clip(P, 1e-12, None)
-    P = P / P.sum()
-    Q = np.clip(Q, 1e-12, None)
-    Q = Q / Q.sum()
-
-    # Marginalize: sum over each axis
-    P_mass, Q_mass = P.sum(axis=0), Q.sum(axis=0)  # Sum over coupling
-    P_cp, Q_cp = P.sum(axis=1), Q.sum(axis=1)      # Sum over mass
-
-    # Validate shapes
-    assert len(P_mass) == len(Q_mass), \
-        f"Mass marginals mismatch: {P_mass.shape} vs {Q_mass.shape}"
-    assert len(P_cp) == len(Q_cp), \
-        f"Coupling marginals mismatch: {P_cp.shape} vs {Q_cp.shape}"
-    
-    # Use bin indices as locations
-    x_mass = np.arange(len(P_mass))
-    x_cp = np.arange(len(P_cp))
-
-    # Compute Wasserstein distances
-    d_mass = wasserstein_distance(x_mass, x_mass, P_mass, Q_mass)
-    d_cp = wasserstein_distance(x_cp, x_cp, P_cp, Q_cp)
-
-    return {"mass": d_mass, "cp": d_cp}
-
-
-def wasserstein_eval_marginals(
-    model: torch.nn.Module,
-    test_features: torch.Tensor,
-    test_thetas: torch.Tensor,
-    logm_range: Tuple[float, float],
-    logcp_range: Tuple[float, float],
-    ppg,  # PoissonPosteriorGrid
-    posteriorbins: int = 100,
-    device: str = "cpu",
-    n_samples: int = 200,
-) -> Tuple[Dict[str, float], Dict[str, np.ndarray]]:
-    """
-    Evaluate marginal Wasserstein distances between NN and analytical posteriors.
-
-    Parameters
-    ----------
-    model : torch.nn.Module
-        Trained neural network model.
-    test_features : torch.Tensor
-        Test observations.
-    test_thetas : torch.Tensor
-        True parameters.
-    logm_range : Tuple[float, float]
-        (min, max) for log10(mass).
-    logcp_range : Tuple[float, float]
-        (min, max) for log10(coupling).
-    ppg : PoissonPosteriorGrid
-        Analytical posterior grid.
-    posteriorbins : int
-        Posterior grid resolution.
-    device : str
-        Device for computation.
-    n_samples : int
-        Number of samples to evaluate.
-
-    Returns
-    -------
-    mean_dists : Dict[str, float]
-        Mean Wasserstein distances for "mass" and "cp" marginals.
-    results : Dict[str, np.ndarray]
-        Per-sample distances and true parameters.
-    """
-    n_total = min(n_samples, len(test_features))
-    d_mass_list, d_cp_list = [], []
-    logm_vals, logcp_vals = [], []
-
-    for i in range(n_total):
-        counts = test_features[i].to(device)
-        logm_true, logcp_true = test_thetas[i].cpu().numpy()
-
-        # Analytical posterior
-        counts_np = counts.cpu().numpy()
-        counts_analytical = counts_np[:100]
-        posterior_true = ppg.posterior_binned(counts_analytical)
-
-        # Learned posterior
-        counts = preprocess_features(model, counts, device)
-        posterior_learned, _, _ = posterior_grid(
-            counts, logm_range, logcp_range, posteriorbins, model, device
-        )
-        posterior_learned = posterior_learned.cpu().numpy()
-
-        # Compute marginal Wasserstein distances
-        dists = wasserstein_marginals(posterior_true, posterior_learned)
-        d_mass_list.append(dists["mass"])
-        d_cp_list.append(dists["cp"])
-        logm_vals.append(logm_true)
-        logcp_vals.append(logcp_true)
-
-    mean_dists = {
-        "mass": float(np.mean(d_mass_list)),
-        "cp": float(np.mean(d_cp_list)),
-    }
-    
-    results = {
-        "mass": np.array(d_mass_list),
-        "cp": np.array(d_cp_list),
-        "logm": np.array(logm_vals),
-        "logcp": np.array(logcp_vals),
-    }
-
-    return mean_dists, results
-
-
-def plot_wasserstein_marginals(results, mean_dists, bins=15, cmap="viridis", fill_holes=False):
-    """
-    Plot marginal Wasserstein distances for mass and coupling.
-
-    Parameters
-    ----------
-    results : dict
-        Output of `wasserstein_eval_marginals` with keys
-        ["mass", "cp", "logm", "logcp"].
-    mean_dists : dict
-        Mean Wasserstein distances {"mass": float, "cp": float}.
-    savepath : str or None
-        If given, save figure to this path.
-    """
-
-    logm  = results["logm"]
-    logcp = results["logcp"]
-    d_mass = results["mass"]
-    d_cp   = results["cp"]
-    d_avg  = (d_mass + d_cp) / 2
-    
-    # -------------------------
-    # Figure 1: 1D Scatter plots (distance vs. parameter)
-    # -------------------------
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
-
-    axes[0].scatter(logm, d_mass, alpha=0.7, s=20)
-    axes[0].set_xlabel("True log10(mass)")
-    axes[0].set_ylabel("Wasserstein distance (mass)")
-    axes[0].set_title(f"Mass marginal (mean = {mean_dists['mass']:.4f})")
-    axes[0].grid(True, linestyle="--", alpha=0.3)
-
-    axes[1].scatter(logcp, d_cp, alpha=0.7, color="orange", s=20)
-    axes[1].set_xlabel("True log10(coupling)")
-    axes[1].set_ylabel("Wasserstein distance (cp)")
-    axes[1].set_title(f"Coupling marginal (mean = {mean_dists['cp']:.4f})")
-    axes[1].grid(True, linestyle="--", alpha=0.3)
-
-    fig.tight_layout()
-    plt.show()
-
-    # -------------------------
-    # Figure 2: 2D Scatter plots (parameter space colored by distance)
-    # -------------------------
-    fig2, axes2 = plt.subplots(1, 2, figsize=(12, 4))
-
-    sc0 = axes2[0].scatter(logm, logcp, c=d_mass, cmap=cmap, s=20)
-    axes2[0].set_xlabel("True log10(mass)")
-    axes2[0].set_ylabel("True log10(coupling)")
-    axes2[0].set_title("Mass marginal distance")
-    plt.colorbar(sc0, ax=axes2[0], label="Wasserstein (mass)")
-
-    sc1 = axes2[1].scatter(logm, logcp, c=d_cp, cmap=cmap, s=20)
-    axes2[1].set_xlabel("True log10(mass)")
-    axes2[1].set_ylabel("True log10(coupling)")
-    axes2[1].set_title("Coupling marginal distance")
-    plt.colorbar(sc1, ax=axes2[1], label="Wasserstein (cp)")
-    fig2.tight_layout()
-    plt.show()
-
-
-
-# ============================================================================
-# Wasserstein distance - sliced
-# ============================================================================
-
-def sliced_wasserstein_2D(
-    P: np.ndarray,
-    Q: np.ndarray,
-    n_projections: int = 50,
-    seed: Optional[int] = None,
-) -> float:
-    """
-    Approximate 2D Wasserstein distance via sliced Wasserstein method.
-    
-    Parameters
-    ----------
-    P, Q : np.ndarray
-        2D discrete probability distributions (must have same shape).
-    n_projections : int
-        Number of random projection directions.
-    seed : Optional[int]
-        Random seed for reproducibility.
-    
-    Returns
-    -------
-    float
-        Approximate sliced Wasserstein distance.
-    """
-    rng = np.random.default_rng(seed)
-    
-    # Normalize to probabilities
-    P = np.clip(P, 1e-12, None)
-    P = P / P.sum()
-    Q = np.clip(Q, 1e-12, None)
-    Q = Q / Q.sum()
-
-    # Get coordinates of pixels
-    H, W = P.shape
-    x = np.arange(W)
-    y = np.arange(H)
-    X, Y = np.meshgrid(x, y)
-    coords = np.stack([X.ravel(), Y.ravel()], axis=1)  # Shape: (H*W, 2)
-
-    # Flatten probability distributions
-    P_flat = P.ravel()
-    Q_flat = Q.ravel()
-
-    # Compute Wasserstein distance along random projections
-    distances = []
-    for _ in range(n_projections):
-        # Random unit direction in 2D
-        theta = rng.uniform(0, 2 * np.pi)
-        direction = np.array([np.cos(theta), np.sin(theta)])
-
-        # Project coordinates onto direction
-        proj = coords @ direction
-
-        # Compute 1D Wasserstein distance along projection
-        d = wasserstein_distance(proj, proj, P_flat, Q_flat)
-        distances.append(d)
-
-    return float(np.mean(distances))
-
-
-def wasserstein_eval_sliced(
-    model: torch.nn.Module,
-    test_features: torch.Tensor,
-    test_thetas: torch.Tensor,
-    logm_range: Tuple[float, float],
-    logcp_range: Tuple[float, float],
-    ppg,  # PoissonPosteriorGrid
-    posteriorbins: int = 100,
-    device: str = "cpu",
-    n_samples: int = 200,
-    n_projections: int = 50,
-    seed: Optional[int] = None,
-) -> Tuple[float, Dict[str, np.ndarray]]:
-    """
-    Compute sliced Wasserstein distance between NN and analytical posteriors.
-
-    Parameters
-    ----------
-    model : torch.nn.Module
-        Trained neural network model.
-    test_features : torch.Tensor
-        Test observations.
-    test_thetas : torch.Tensor
-        True parameters.
-    logm_range : Tuple[float, float]
-        (min, max) for log10(mass).
-    logcp_range : Tuple[float, float]
-        (min, max) for log10(coupling).
-    ppg : PoissonPosteriorGrid
-        Analytical posterior grid.
-    posteriorbins : int
-        Posterior grid resolution.
-    device : str
-        Device for computation.
-    n_samples : int
-        Number of samples to evaluate.
-    n_projections : int
-        Number of random 1D projections for sliced Wasserstein.
-    seed : Optional[int]
-        Random seed for reproducibility.
-
-    Returns
-    -------
-    mean_wass : float
-        Mean sliced Wasserstein distance.
-    results : Dict[str, np.ndarray]
-        Dictionary with per-sample results.
-    """
-    n_total = min(n_samples, len(test_features))
-    wass_values, logm_vals, logcp_vals = [], [], []
-
-    for i in range(n_total):
-        counts = test_features[i].to(device)
-        logm_true, logcp_true = test_thetas[i].cpu().numpy()
-
-        # Analytical posterior
-        counts_np = counts.cpu().numpy()
-        counts_analytical = counts_np[:100]
-        posterior_true = ppg.posterior_binned(counts_analytical)
-
-        # Learned posterior
-        counts = preprocess_features(model, counts, device)
-        posterior_learned, _, _ = posterior_grid(
-            counts, logm_range, logcp_range, posteriorbins, model, device
-        )
-        posterior_learned = posterior_learned.cpu().numpy()
-
-        # Sliced Wasserstein distance
-        wass_val = sliced_wasserstein_2D(
-            posterior_true, posterior_learned,
-            n_projections=n_projections,
-            seed=seed
-        )
-        
-        wass_values.append(wass_val)
-        logm_vals.append(logm_true)
-        logcp_vals.append(logcp_true)
-
-    mean_wass = float(np.mean(wass_values))
-    results = {
-        "wass": np.array(wass_values),
-        "logm": np.array(logm_vals),
-        "logcp": np.array(logcp_vals),
-    }
-    
-    return mean_wass, results
-
-
-def plot_wasserstein_diagnostics(results, bins=15, cmap="viridis", fill_holes=False, ):
-    """
-    Visualize Wasserstein values across parameter space.
-
-    Parameters
-    ----------
-    results : dict
-        Output of wasserstein_eval (contains "wass", "logm", "logcp").
-    bins : int
-        Number of bins per axis for heatmap.
-    cmap : str
-        Colormap for plots.
-    """
-
-    logm = results["logm"]
-    logcp = results["logcp"]
-    wass = results["wass"]
-
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-
-    # --- 1. Raw scatter ---
-    sc = axes[0].scatter(logm, logcp, c=wass, cmap=cmap, s=20)
-    axes[0].set_title("Scatter: Per-sample Wasserstein")
-    axes[0].set_xlabel(r"log10(mass)")
-    axes[0].set_ylabel(r"log10(coupling)")
-    plt.colorbar(sc, ax=axes[0], label="Wasserstein Distance")
-
-    # --- 2. Heatmap (binned average) ---
-    if fill_holes:
-        heatmap, xedges, yedges = compute_filled_heatmap(logm, logcp, wass, bins=bins)
-
-    else:
-        heatmap, xedges, yedges, binnum = stats.binned_statistic_2d(
-            logm, logcp, wass, statistic="mean", bins=bins
-        )
-
-    im = axes[1].imshow(
-        heatmap.T, origin="lower", aspect="auto",
-        extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]],
-        cmap=cmap
-    )
-    axes[1].set_title("Heatmap: Avg. Wasserstein per bin")
-    axes[1].set_xlabel("log10(mass)")
-    axes[1].set_ylabel("log10(coupling)")
-    plt.colorbar(im, ax=axes[1], label="Mean Wasserstein")
-
-    plt.tight_layout(); plt.show()
 
 
 
