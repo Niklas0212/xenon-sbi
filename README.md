@@ -85,8 +85,8 @@ Start with:
 
 - [sbi_notebooks/sbi_wimpy.ipynb](sbi_notebooks/sbi_wimpy.ipynb)
 - [sbi_notebooks/sbi_s1s2_signal_only.ipynb](sbi_notebooks/sbi_s1s2_signal_only.ipynb)
-- [sbi_notebooks/sbi_s1s2_signal_bg.ipynb](sbi_notebooks/sbi_s1s2_signal_bg.ipynb)
-- [sbi_notebooks/sbi_comparison.ipynb](sbi_notebooks/sbi_comparison.ipynb)
+- [sbi_notebooks/old approach - uncertainty band/sbi_s1s2_signal_bg_old.ipynb](sbi_notebooks/old%20approach%20-%20uncertainty%20band/sbi_s1s2_signal_bg_old.ipynb)
+- [sbi_notebooks/new approach - posterior averaging/sbi_s1s2_signal_bg_new.ipynb](sbi_notebooks/new%20approach%20-%20posterior%20averaging/sbi_s1s2_signal_bg_new.ipynb)
 
 ### 4) Evaluate model quality
 
@@ -99,3 +99,31 @@ python -m performances.performances --n-total 5000 --datatags low mid high --hal
 - Keep configuration changes centralized in [configs/config.py](configs/config.py).
 - Utility signature changes in [utils](utils) usually affect training scripts, notebooks, and performance code simultaneously.
 - Many paths follow strict naming conventions; preserve them unless intentionally migrating old checkpoints/datasets.
+
+## Data Availability and Repository Layout Notes
+
+### Reduced datasets on GitHub
+
+Training was performed on **n = 300,000** spectra per dataset. The full datasets
+are several gigabytes and exceed GitHub's file-size limits, so this repository
+ships only a **reduced subset of the first n = 30,000 spectra** for each dataset,
+sufficient to run and inspect the pipeline. The same applies to the ER background
+pool, which is likewise truncated here.
+
+The **trained model checkpoints** in [models](models), however, correspond to the
+**full n = 300,000** training runs. Re-training on the reduced GitHub subset will
+therefore not reproduce the published checkpoints; it is intended only for testing
+the pipeline end-to-end. To reproduce the full results, regenerate the complete
+datasets with the data-generation scripts (see Quick Start) using n = 300,000.
+
+### Two exclusion approaches in `sbi_notebooks`
+
+The [sbi_notebooks](sbi_notebooks) folder contains two subfolders reflecting the
+two methods we used to derive the 90% upper-limit exclusions:
+
+- **`old approach - uncertainty bands`**: the original approach, deriving the
+  exclusion by marginalizing the posterior over background realizations and
+  extracting per-realization quantile bands.
+- **`new approach - posterior averaging`**: the alternative approach used for the
+  final results, which averages the posteriors over many background realizations
+  and applies a single 90% HPD exclusion to the averaged posterior.

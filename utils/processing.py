@@ -480,6 +480,41 @@ class SignalPlusBackgroundDataset(torch.utils.data.Dataset):
 # S1S2 VALIDATION DATALOADER
 # ============================================================================
 
+import warnings
+import os
+import re
+
+def _resolve_with_fallback(path: str, fallback: str) -> str:
+    """Return *path* if it exists, else *fallback* if that exists, else raise."""
+    if os.path.exists(path):
+        return path
+    if fallback is not None and os.path.exists(fallback):
+        warnings.warn(
+            f"Not found: {path}\n  falling back to: {fallback}",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+        return fallback
+    raise FileNotFoundError(
+        f"Neither the requested file nor its fallback exists:\n"
+        f"  requested: {path}\n"
+        f"  fallback:  {fallback}"
+    )
+
+
+def _signal_fallback(signal_pt: str) -> str:
+    """Map .../wimpy_n300000_<tag>_<halo>.pt -> .../wimpy_n30000_<tag>_<halo>.pt"""
+    return re.sub(r"_n300000_", "_n30000_", signal_pt)
+
+
+def _bg_fallback(bg_csv: str) -> str:
+    """Map .../s1s2_ers.csv -> .../s1s2_ers_small.csv"""
+    root, ext = os.path.splitext(bg_csv)
+    return f"{root}_small{ext}"
+
+
+
+
 def load_s1s2_valloader(
     signal_pt: str,
     bg_csv: str,
@@ -489,10 +524,16 @@ def load_s1s2_valloader(
     batch_size: int = 128,
     test_size: float = 0.2,
     random_state: int = 42,
+    allow_fallback: bool = True,
 ):
     """
     Load S1S2 signal data, split off a validation set, add background,
     and return a DataLoader of positive/negative pairs for evaluation.
+
+    If a requested file is missing and *allow_fallback* is True, the smaller
+    variant is used instead (n=300000 -> n=30000 for the signal, and the
+    "_small" CSV for the ER background). A RuntimeWarning is emitted whenever
+    a fallback is taken, so results are never silently computed on less data.
 
     Parameters
     ----------
@@ -512,15 +553,24 @@ def load_s1s2_valloader(
         Fraction of samples held out as validation set.
     random_state : int
         Random seed for reproducibility of the train/test split.
+    allow_fallback : bool
+        If True, substitute the smaller dataset when the requested file is absent.
 
     Returns
     -------
     val_loader : DataLoader
         DataLoader with (features, theta, label) triplets.
     bg_events : np.ndarray
-        Background event pool loaded from *bg_csv*.
+        Background event pool loaded from the resolved CSV.
     """
-    
+
+    # Resolve paths, falling back to the smaller datasets if needed
+    signal_pt = _resolve_with_fallback(
+        signal_pt, _signal_fallback(signal_pt) if allow_fallback else None
+    )
+    bg_csv = _resolve_with_fallback(
+        bg_csv, _bg_fallback(bg_csv) if allow_fallback else None
+    )
 
     # Load signal data
     signal_data = torch.load(signal_pt, weights_only=False)

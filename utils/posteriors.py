@@ -33,7 +33,7 @@ from utils.processing import preprocess_features, get_matching_pairs
 TRUE_POINT_COLOR = "#FF3333"  # Red for true parameter markers
 M_PROTON_GEV = 0.938
 GEV2_TO_CM2 = 3.89379e-28
-DEFAULT_XENONNT_PATH = "data\\datasets\\xenon\\s1s2\\official\\xenonnt_2025_si_wimp.csv"
+DEFAULT_XENONNT_PATH = "data\\datasets\\xenon\\s1s2\\official\\XENONnT_2023_WIMP_SI.csv"
 
 # Shared plotting style 
 PLOT_AXIS_LABEL_SIZE = 16
@@ -174,7 +174,7 @@ def plot_official_xenonnt_limit(
     official_xenonnt_limit: Optional[Dict[str, np.ndarray]] = None,
     official_xenonnt_path: str = DEFAULT_XENONNT_PATH,
     official_max_mass: float = 1000.0,
-    label: str = "XENONnT 2025 (expected)",
+    label: str = "XENONnT 2023 (expected)",
     color: str = TRUE_POINT_COLOR,
     linewidth: float = 2.6,
 ):
@@ -2210,130 +2210,6 @@ def plot_marginalized_limits_with_bands(
     plt.tight_layout()
     if save_path is not None:
         fig.savefig(save_path, dpi=300, bbox_inches="tight", format="pdf", transparent=True)
-    plt.show()
-
-
-def plot_individual_marginalized_limits_grid(
-    background_events: np.ndarray,
-    mu_bg: float,
-    bins: int = 30,
-    logm_range: Tuple[float, float] = None,
-    logcp_range: Tuple[float, float] = None,
-    model: nn.Module = None,
-    device: str = "cpu",
-    seed_offset: int = 0,
-    grid_size: int = 5,
-    show_posterior: bool = True,
-    show_limits: bool = True,
-    posteriorbins: int = 200,
-    cl: float = 0.90,
-    critical_mass: Optional[float] = None,
-    plot_title: Optional[str] = None,
-):
-    """
-    Plot grid of individual 1D marginalized upper limits with posteriors.
-    
-    Shows a 5×5 (or custom grid_size) panel display where each panel represents
-    one background realization showing:
-    - Background (as contour fills): the 2D posterior p(mχ, cp | data)
-    - Red curve overlaid: the 1D marginalized upper limit at each mass
-    
-    This visualization helps understand:
-    - Which realizations have strongly constraining posteriors (tight curves)
-    - Which have weak constraints (flat posteriors → missing/NaN limits)
-    - How background fluctuations affect the limit variability
-    
-    Each panel is labeled with its random seed for reproducibility tracking.
-    
-    Args:
-        background_events: Array of (n_events, 2) with background S1, S2 values
-        mu_bg: Expected number of background events
-        bins: Number of bins in S1/S2 dimensions
-        logm_range, logcp_range: Posterior grid ranges
-        model: Trained SBI model
-        device: torch device
-        seed_offset: Random seed offset
-        grid_size: Grid dimension (5 = 5×5 = 25 panels)
-        show_posterior: If True, show posterior as background; if False, show only limits
-        show_limits: If True, overlay 1D marginalized upper-limit curves (default: True)
-        posteriorbins: Grid resolution for posterior computation
-        cl: Credible level for upper limits
-        critical_mass: Optional mass threshold (GeV). If specified, only plot limits above this mass
-        plot_title: Optional custom title (default: auto-generated from cl)
-    """
-    if logm_range is None:
-        logm_range = DEFAULT_LOGM_RANGE
-    if logcp_range is None:
-        logcp_range = DEFAULT_LOGCP_RANGE
-    n_realizations = grid_size * grid_size
-    grid_seeds = np.arange(n_realizations) + seed_offset
-    figsize = (3.0 * grid_size, 3.0 * grid_size)
-
-    fig, axes = plt.subplots(grid_size, grid_size, figsize=figsize, sharex=True, sharey=True)
-    axes = axes.flatten()
-
-    for idx, seed in enumerate(grid_seeds):
-        ax = axes[idx]
-
-        # Generate null spectrum with random background event sampling
-        null_spec = generate_null_spectrum_s1s2(
-            background_events=background_events,
-            mu_bg=mu_bg,
-            s1_bins=bins,
-            s2_bins=bins,
-            rng_seed=int(seed),
-        )
-
-        # Compute 2D posterior for this spectrum
-        posterior, logm_vals_grid, logcp_vals_grid = posterior_grid(
-            null_spec,
-            logm_range=logm_range,
-            logcp_range=logcp_range,
-            posteriorbins=posteriorbins,
-            model=model,
-            device=device,
-        )
-
-        posterior_np = posterior.detach().cpu().numpy()
-        m_vals_grid = 10 ** logm_vals_grid
-        cp_vals_grid_full = 10 ** logcp_vals_grid
-
-        # Show 2D posterior as background
-        if show_posterior:
-            ax.contourf(m_vals_grid, cp_vals_grid_full, posterior_np, levels=50, cmap="viridis", alpha=0.7)
-
-        # Overlay the 1D marginalized upper limit
-        if show_limits:
-            logcp_lim_grid = compute_marginalized_upper_limit(posterior_np, logm_vals_grid, logcp_vals_grid, cl=cl)
-            cp_vals_grid = 10 ** logcp_lim_grid
-            valid_mask = np.isfinite(logcp_lim_grid)  # Filter out NaN limits
-            
-            # Apply critical mass threshold if specified
-            if critical_mass is not None:
-                above_threshold = m_vals_grid >= critical_mass
-                valid_mask = valid_mask & above_threshold
-            
-            ax.plot(m_vals_grid[valid_mask], cp_vals_grid[valid_mask], color="red", linewidth=1.2, alpha=0.9)
-
-        ax.set_xscale("log")
-        ax.set_yscale("log")
-        ax.set_xlim(10 ** logm_range[0], 10 ** logm_range[1])
-        ax.set_ylim(10 ** logcp_range[0], 10 ** logcp_range[1])
-        ax.tick_params(labelsize=6)
-        ax.grid(True, which="both", ls="--", alpha=0.3, linewidth=0.5)
-
-        # Label with seed number for tracking
-        ax.text(0.95, 0.05, f"{seed}", transform=ax.transAxes, fontsize=6, ha="right", va="bottom", color="gray")
-
-    # Add axis labels to edges
-    fig.text(0.5, 0.04, r"$m_\chi$ [GeV]", ha="center", fontsize=14)
-    fig.text(0.04, 0.5, r"$c_p$ [GeV$^{-2}$]", va="center", rotation="vertical", fontsize=14)
-
-    if plot_title is None:
-        plot_title = f"Individual {int(cl*100)}% CL Upper Limits (1D Marginalized)"
-    fig.suptitle(plot_title, fontsize=16, y=0.995)
-
-    plt.tight_layout(rect=[0.05, 0.05, 1, 0.99])
     plt.show()
 
 
