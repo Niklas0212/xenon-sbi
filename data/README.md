@@ -1,15 +1,17 @@
 # Data generation and training-data pipeline
 
 This folder contains the main data-generation workflow for the project. It is
-where WIMP recoil spectra are simulated, converted into training samples, and
-stored in a form used by the downstream inference pipeline.
+where WIMP recoil events are simulated, converted into feature tensors, and
+stored in a form used by the downstream inference pipeline. The generator uses
+the WimPyDD package and a Xenon target for an isoscalar spin-independent
+interaction.
 
 ## Reader takeaways
 
-- `mc_generator.py` is the core algorithm that samples recoil energies from the
-  WimPyDD physics model.
-- `generate_dataset.py` builds full datasets, typically with `n = 300_000`
-  samples, and packages the simulations into `.pt` files.
+- `mc_generator.py` computes differential recoil rates and samples recoil
+  energies from the WimPyDD physics model.
+- `generate_dataset.py` samples the prior in `log10(mchi)` and `log10(cp)`,
+  simulates the events, and packages the results into `.pt` files.
 - The `datatag` choices `low`, `mid`, and `high` define different parameter
   regions; the higher-coupling cases often produce unrealistically large event
   counts and are not always physically motivated for the final analysis.
@@ -17,8 +19,8 @@ stored in a form used by the downstream inference pipeline.
   Gaia-inspired halo model.
 - The `datasets/` folder contains the main data products, split into `wimpy/`
   and `xenon/` families.
-- `wimpy/` stores parameter-spectrum pairs: sampled physics parameters together
-  with the corresponding recoil-energy spectra.
+- `wimpy/` stores sampled parameters (`theta`), feature vectors, and the
+  corresponding recoil-energy events.
 - These recoil energies are later passed through the fusion stage, where `.pt`
   files are converted into CSVs in `datasets/xenon/wimpy/`.
 - `datasets/xenon/s1s2/` stores the fused detector-level outputs, including
@@ -28,14 +30,45 @@ stored in a form used by the downstream inference pipeline.
 - `official/` stores official exclusion-limit reference files, while `ers/`
   contains the electronic recoil background pool used in the fused workflow.
 
+## Running the generator
+
+The data-generation jobs are run on the Midway cluster, typically through
+Slurm. Run the module from the repository root so that the relative paths to
+`data/datasets/` and `WimPyDD/Halo_functions/` resolve correctly:
+
+```bash
+python3 -m data.generate_dataset --n_train 300000 --datatag low --halo_option shm
+```
+
+`--datatag` is required and must be `low`, `mid`, or `high`. The halo option
+defaults to `default` and may also be `shm`, `shmpp`, `lmc`, `x1`, or `x2`.
+For SHM++, first create or provide a cached halo file and pass it explicitly:
+
+```bash
+python3 -m data.compute_shmpp 1000
+python3 -m data.generate_dataset --n_train 300000 --datatag low \
+  --halo_option shmpp --shmpp_file shmpp_1000.npy
+```
+
+The generator uses `SLURM_CPUS_PER_TASK` when it is set; otherwise it chooses
+available local CPU workers. The output is written to
+`data/datasets/wimpy/<halo_option>/wimpy_n{n_train}_{datatag}_{halo_option}.pt`.
+
+Each file contains `theta`, `features`, and `events`, together with the prior
+ranges, Monte Carlo configuration, halo choice, and metadata. By default,
+`features` consists of 100 logarithmically spaced recoil-count bins, the total
+event count, and the ten highest-energy recoil events. The default simulation
+uses a 365,000 kg-day exposure, a 1-100 keV recoil range, and Poisson event
+sampling; these values are defined in `configs/config.py`.
+
 ## File and folder overview
 
 - `generate_dataset.py`: creates full training datasets from sampled prior
-  points.
-- `mc_generator.py`: computes recoil spectra, event bins, and Poisson-sampled
-  recoil energies under different halo assumptions.
+  points. It parallelizes simulations and saves PyTorch dictionaries.
+- `mc_generator.py`: computes differential rates, event bins, and
+  Poisson-sampled recoil energies under different halo assumptions.
 - `compute_shmpp.py`: computes and caches the SHM++ halo integral used in the
-  Gaia-inspired halo model.
+  Gaia-inspired halo model. This is an expensive one-time precomputation.
 - `datasets/`: generated data products.
 - `notebooks/`: visualization and preprocessing notebooks.
 
@@ -79,9 +112,11 @@ and the LMC model relies on the text file `WimPyDD/Halo_functions/lmc.txt`.
 
 ## Typical workflow
 
-1. Simulate recoil spectra using `mc_generator.py`.
-2. Generate full datasets with `generate_dataset.py`.
-3. Store `.pt` files under `datasets/wimpy/...`.
-4. Convert them to CSVs and fuse them into Xenon observables in
+1. Create or activate the project environment defined in `environment.yml`.
+2. Optionally precompute the SHM++ halo integral with `compute_shmpp.py`.
+3. Generate full datasets with `generate_dataset.py`; it calls
+  `mc_generator.py` for each sampled parameter point.
+4. Store `.pt` files under `datasets/wimpy/...`.
+5. Convert them to CSVs and fuse them into Xenon observables in
    `datasets/xenon/...`.
-5. Use the resulting files for training and benchmark comparisons.
+6. Use the resulting files for training and benchmark comparisons.

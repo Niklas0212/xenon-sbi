@@ -37,6 +37,7 @@ training, comparison, or exclusion-limit studies.
 ## Important notes
 
 - The workflow is chunk-based to enable parallel execution on a cluster.
+- The scripts are run on the Midway cluster using Slurm.
 - Large datasets are split into many smaller pieces, each processed separately,
   then merged afterwards.
 - This pipeline is intended to convert nuclear recoil inputs into detector-level
